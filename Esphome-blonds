@@ -1,0 +1,106 @@
+esphome:
+  name: blinds
+  platform: ESP8266
+  board: d1_mini
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_pw
+  fast_connect: true
+
+# Enable logging
+logger:
+  
+# Enable Home Assistant API
+api:
+  password: !secret HA_API
+  services:
+    - service: control_stepper
+      variables:
+        target: float
+      then:
+        - stepper.set_target:
+            id: my_stepper
+            target: !lambda "return target;"
+        - cover.template.publish:
+            id: blinds
+            position: !lambda "return 1 - ((target) / id(stepper_steps));"
+
+ota:
+  password: !secret OTA_pw
+
+globals:
+  - id: stepper_steps
+    type: int
+    initial_value: '11600'
+  - id: stepper_position
+    type: float
+    initial_value: '0'
+  - id: stepper_state
+    type: int
+    initial_value: ‘0'
+
+cover:
+  - platform: template
+    name: "Blinds"
+    id: blinds
+    open_action:
+      - globals.set:
+          id: stepper_state
+          value: '1'
+      - stepper.set_target:
+          id: my_stepper
+          target: 0
+      - delay: !lambda "return (id(my_stepper).current_position / id(stepper_steps)) * 30000;"
+      - globals.set:
+          id: stepper_position
+          value: !lambda "return id(my_stepper).target_position;"
+      - globals.set:
+          id: stepper_state
+          value: '0'
+    close_action:
+      - globals.set:
+          id: stepper_state
+          value: '1'
+      - stepper.set_target:
+          id: my_stepper
+          target: !lambda "return id(stepper_steps);"
+      - delay: !lambda "return (1 - (id(my_stepper).current_position / id(stepper_steps))) * 30000;"
+      - globals.set:
+          id: stepper_position
+          value: !lambda "return id(my_stepper).target_position;"
+      - globals.set:
+          id: stepper_state
+          value: '0'
+    stop_action:
+      - stepper.set_target:
+          id: my_stepper
+          target: !lambda "return id(my_stepper).current_position;" 
+      - globals.set:
+          id: stepper_position
+          value: !lambda "return id(my_stepper).current_position;"
+      - globals.set:
+          id: stepper_state
+          value: '0'
+      - cover.template.publish:
+          id: blinds
+          position: !lambda "return 1 - (id(stepper_position) / id(stepper_steps));"
+    position_action:
+      - stepper.set_target:
+          id: my_stepper
+          target: !lambda "return id(stepper_steps) * (1 - pos);"
+    optimistic: true
+    assumed_state: true
+    has_position: true
+    
+stepper:
+  - platform: a4988
+    id: my_stepper
+    dir_pin: D3
+    step_pin: D2
+    max_speed: 500 steps/s
+
+    # Optional:
+    sleep_pin: D1
+    acceleration: inf
+    deceleration: inf
