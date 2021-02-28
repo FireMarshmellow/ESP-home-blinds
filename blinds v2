@@ -1,0 +1,189 @@
+esphome:
+  name: blinds
+  platform: ESP8266
+  board: d1_mini
+
+wifi:
+  ssid: ""
+  password: ""
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: ""
+    password: ""
+
+captive_portal:
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  services:
+    - service: control_stepper
+      variables:
+        target: float
+      then:
+        - stepper.set_target:
+            id: my_stepper
+            target: !lambda "return target;"
+        - cover.template.publish:
+            id: blinds
+            position: !lambda "return 1 - ((target) / id(stepper_steps));"
+
+ota:
+
+output:
+  - platform: gpio
+    id: 'shade1'
+    pin: D1
+  - platform: gpio
+    id: 'shade2'
+    pin: D2
+
+switch:
+  - platform: output
+    name: "shade1"
+    output: 'shade1'
+    id: shade_s1
+  - platform: output
+    name: "shade2"
+    output: 'shade2'
+    id: shade_s2
+
+binary_sensor:
+  - platform: gpio
+    pin: D3
+    name: "Button"
+    filters:
+      invert:
+    on_press:
+      then:
+        - lambda: |
+            if (id(kitchen_window).state == cover::COVER_OPEN) {
+              if (id(shade_s1).state){
+                // shade is opening
+                id(kitchen_window).stop();
+              } else {
+                // shade is open and not moving
+                id(kitchen_window).close();
+              }
+            } else {
+              if (id(shade_s2).state){
+                // shade is closing
+                id(kitchen_window).stop();
+              } else {
+                // shade is closed and not moving
+                id(kitchen_window).open();
+              }
+            }
+cover:
+  - platform: template
+    name: "Blinds tilt"
+    id: blinds
+    open_action:
+      - globals.set:
+          id: stepper_state
+          value: '1'
+      - stepper.set_target:
+          id: my_stepper
+          target: 0
+      - delay: !lambda "return (id(my_stepper).current_position / id(stepper_steps)) * 30000;"
+      - globals.set:
+          id: stepper_position
+          value: !lambda "return id(my_stepper).target_position;"
+      - globals.set:
+          id: stepper_state
+          value: '0'
+    close_action:
+      - globals.set:
+          id: stepper_state
+          value: '1'
+      - stepper.set_target:
+          id: my_stepper
+          target: !lambda "return id(stepper_steps);"
+      - delay: !lambda "return (1 - (id(my_stepper).current_position / id(stepper_steps))) * 30000;"
+      - globals.set:
+          id: stepper_position
+          value: !lambda "return id(my_stepper).target_position;"
+      - globals.set:
+          id: stepper_state
+          value: '0'
+    stop_action:
+      - stepper.set_target:
+          id: my_stepper
+          target: !lambda "return id(my_stepper).current_position;" 
+      - globals.set:
+          id: stepper_position
+          value: !lambda "return id(my_stepper).current_position;"
+      - globals.set:
+          id: stepper_state
+          value: '0'
+      - cover.template.publish:
+          id: blinds
+          position: !lambda "return 1 - (id(stepper_position) / id(stepper_steps));"
+    position_action:
+      - stepper.set_target:
+          id: my_stepper
+          target: !lambda "return id(stepper_steps) * (1 - pos);"
+    optimistic: true
+    assumed_state: true
+    has_position: true
+  - platform: template
+    name: " Blinds open and close"
+    id: kitchen_window
+    optimistic: true
+    open_action:
+      - switch.turn_off: shade_s2
+      - switch.turn_on: shade_s1
+      - delay: 25s
+      - switch.turn_off: shade_s1
+    close_action:
+      - switch.turn_off: shade_s1
+      - switch.turn_on: shade_s2
+      - delay: 25s
+      - switch.turn_off: shade_s2
+    stop_action:
+      - switch.turn_off: shade_s1
+      - switch.turn_off: shade_s2
+    
+      
+  - platform: template
+    name: "Kitchen Window Control"
+    id: kitchen_control
+    assumed_state: true
+
+
+    open_action:
+      - switch.turn_off: shade_s2
+      - switch.turn_on: shade_s1
+    close_action:
+      - switch.turn_off: shade_s1
+      - switch.turn_on: shade_s2
+    stop_action:
+      - switch.turn_off: shade_s1
+      - switch.turn_off: shade_s2
+
+globals:
+  - id: stepper_steps
+    type: int
+    initial_value: '600'
+  - id: stepper_position
+    type: float
+    initial_value: '0'
+  - id: stepper_state
+    type: int
+    initial_value: '0'
+
+stepper:
+  - platform: a4988
+    id: my_stepper
+    step_pin: D6
+    dir_pin: D5
+    max_speed: 250 steps/s
+
+    # Optional:
+    sleep_pin: D7
+    acceleration: inf
+    deceleration: inf
+    
